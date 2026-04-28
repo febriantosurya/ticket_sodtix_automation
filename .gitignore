@@ -1,0 +1,15 @@
+info.json
+
+__pycache__/
+*.pyc
+*.pyo
+
+dist/
+build/
+*.spec
+
+.venv/
+venv/
+env/
+
+*.egg-info/
