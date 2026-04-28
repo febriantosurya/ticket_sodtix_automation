@@ -31,29 +31,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: >
-          pyinstaller --onedir --name TicketBot --collect-all PyQt6
-          --exclude-module PyQt6.QtWebEngineWidgets
-          --exclude-module PyQt6.QtWebEngineCore
-          --exclude-module PyQt6.QtWebEngine
-          --exclude-module PyQt6.QtMultimedia
-          --exclude-module PyQt6.QtMultimediaWidgets
-          --exclude-module PyQt6.QtBluetooth
-          --exclude-module PyQt6.QtNfc
-          --exclude-module PyQt6.QtPositioning
-          --exclude-module PyQt6.QtLocation
-          --exclude-module PyQt6.Qt3DCore
-          --exclude-module PyQt6.Qt3DRender
-          --exclude-module PyQt6.Qt3DInput
-          --exclude-module PyQt6.Qt3DLogic
-          --exclude-module PyQt6.Qt3DAnimation
-          --exclude-module PyQt6.Qt3DExtras
-          --exclude-module PyQt6.QtCharts
-          --exclude-module PyQt6.QtDataVisualization
-          --exclude-module PyQt6.QtQuick
-          --exclude-module PyQt6.QtQuickWidgets
-          --exclude-module PyQt6.QtQml
-          --exclude-module PyQt6.QtSql
-          --exclude-module PyQt6.QtTest
+          pyinstaller --onedir --name TicketBot --strip
+          --collect-submodules PyQt6.QtWidgets
+          --collect-submodules PyQt6.QtCore
+          --collect-submodules PyQt6.QtGui
           --exclude-module matplotlib
           --exclude-module numpy
           --exclude-module PIL
