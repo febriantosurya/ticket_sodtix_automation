@@ -103,7 +103,9 @@ def fill_form(driver, info):
     buyer = info["buyer"]
     holders = info["ticket_holders"]
 
+    print("[~] Waiting for form...")
     wait_for(driver, By.NAME, "orderInfo.name", condition="present")
+    print("[~] Form loaded. Filling buyer info...")
 
     fields = {
         "orderInfo.name": buyer["full_name"],
@@ -117,6 +119,7 @@ def fill_form(driver, info):
         fields[f"passengers.{i}.date_of_birth"] = holder["dob"]
         if holder.get("ktp"):
             fields[f"passengers.{i}.identity_number"] = holder["ktp"]
+        print(f"[~] Holder {i+1}: {holder['full_name']}")
 
     driver.execute_script("""
         var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
@@ -130,29 +133,42 @@ def fill_form(driver, info):
             }
         }
     """, fields)
+    print("[~] Fields filled.")
 
     for i, holder in enumerate(holders):
+        print(f"[~] Selecting gender for holder {i+1}: {holder['gender']}")
         select_gender(driver, i, holder["gender"])
 
+    print("[~] Checking agreement...")
     agree_input = driver.find_element(By.NAME, "is_aggree")
     if not agree_input.is_selected():
         fast_click(driver, agree_input)
 
+    print("[~] Submitting form...")
     submit = wait_for(driver, By.CSS_SELECTOR, "button[type='submit']", condition="clickable")
     fast_click(driver, submit)
 
 
-def run(url, target_categories=None, stop_event=None, version_main=146, auto_proceed=False):
+def open_browser(version_main=146):
+    driver = create_driver(headless=False, version_main=version_main)
+    print("[✓] Browser ready.")
+    return driver
+
+
+def run(url, target_categories=None, stop_event=None, version_main=146, auto_proceed=False, driver=None):
     info = load_info()
     qty = len(info["ticket_holders"])
-    driver = create_driver(headless=False, version_main=version_main)
+    owns_driver = driver is None
+    if owns_driver:
+        driver = create_driver(headless=False, version_main=version_main)
 
     try:
+        print(f"[~] Navigating to event page...")
         driver.get(url)
-
-        print(f"Title: {driver.title}")
-        print(f"URL:   {driver.current_url}")
-        print(f"Buying {qty} ticket(s)")
+        print(f"[~] Title: {driver.title}")
+        print(f"[~] URL:   {driver.current_url}")
+        print(f"[~] Buying {qty} ticket(s)")
+        print(f"[~] Target categories: {', '.join(target_categories)}")
 
         TARGET_CATEGORIES = target_categories
 
@@ -162,6 +178,7 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
                 print("[!] Stopped by user")
                 break
 
+            print("[~] Waiting for ticket cards...")
             wait_for(driver, By.CSS_SELECTOR, ".MuiPaper-root.MuiPaper-elevation.MuiPaper-rounded.MuiPaper-elevation1.css-1k3k3kw", condition="present")
 
             last_count = 0
@@ -171,6 +188,7 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
                 if len(cards) == last_count:
                     break
                 last_count = len(cards)
+            print(f"[~] Found {last_count} ticket card(s). Scanning...")
 
             driver.execute_script("window.scrollTo(0, 0);")
 
@@ -194,7 +212,7 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
                         refresh_triggered = True
                         break
                     else:
-                        print(f"  [AVAILABLE] {label}")
+                        print(f"  [AVAILABLE] {label} — adding {qty} ticket(s)")
                         all_sold_out = False
                         grandparent = driver.execute_script(
                             "return arguments[0].parentElement.parentElement;", h6s[0]
@@ -216,10 +234,12 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
                 driver.refresh()
 
         if selected:
+            print("[~] Proceeding to checkout...")
             checkout_card = driver.find_element(By.CSS_SELECTOR, ".MuiPaper-root.MuiPaper-elevation.MuiPaper-rounded.MuiPaper-elevation1.css-1ddopcr")
             checkout_btn = checkout_card.find_element(By.TAG_NAME, "button")
             fast_click(driver, checkout_btn)
 
+            print("[~] Expanding ticket holder forms...")
             wait_for(driver, By.CSS_SELECTOR, ".MuiAccordionSummary-root", condition="clickable")
             for accordion in driver.find_elements(By.CSS_SELECTOR, ".MuiAccordionSummary-root"):
                 if accordion.get_attribute("aria-expanded") != "true":
@@ -228,9 +248,11 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
             fill_form(driver, info)
 
             if auto_proceed:
+                print("[~] Waiting for payment dialog...")
                 dialog = wait_for(driver, By.CSS_SELECTOR, ".MuiDialog-paper", condition="present")
                 proceed_btn = dialog.find_elements(By.TAG_NAME, "button")[-1]
                 fast_click(driver, proceed_btn)
+                print("[~] Proceeded to payment.")
 
         print("\n[✓] Done! Browser open. Click Stop/Quit to close.")
         if stop_event:
@@ -242,7 +264,8 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
                 pass
 
     finally:
-        driver.quit()
+        if owns_driver:
+            driver.quit()
 
 
 if __name__ == "__main__":

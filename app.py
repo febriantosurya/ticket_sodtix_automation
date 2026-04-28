@@ -3,6 +3,11 @@ import os
 import json
 import threading
 
+if getattr(sys, 'frozen', False):
+    import certifi
+    os.environ['SSL_CERT_FILE'] = certifi.where()
+    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QGroupBox, QSpinBox, QCheckBox
@@ -10,7 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QColor, QPalette, QTextCursor, QCursor
 
-from automation import run, INFO_FILE, INFO_TEMPLATE
+from automation import run, open_browser, INFO_FILE, INFO_TEMPLATE
 
 
 class LogStream(QObject):
@@ -28,23 +33,55 @@ class BotWorker(QThread):
     log = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, url, categories, stop_event, version_main=146, auto_proceed=False):
+    def __init__(self, url, categories, stop_event, version_main=146, auto_proceed=False, driver=None):
         super().__init__()
         self.url = url
         self.categories = categories
         self.stop_event = stop_event
         self.version_main = version_main
         self.auto_proceed = auto_proceed
+        self.driver = driver
 
     def run(self):
         stream = LogStream()
         stream.message.connect(self.log)
         sys.stdout = stream
         try:
-            run(self.url, target_categories=self.categories, stop_event=self.stop_event, version_main=self.version_main, auto_proceed=self.auto_proceed)
+            run(self.url, target_categories=self.categories, stop_event=self.stop_event, version_main=self.version_main, auto_proceed=self.auto_proceed, driver=self.driver)
         except Exception as e:
             self.log.emit(f"[ERROR] {e}")
         finally:
+            sys.stdout = sys.__stdout__
+            self.finished.emit()
+
+
+class BrowserWorker(QThread):
+    log = pyqtSignal(str)
+    driver_ready = pyqtSignal(object)
+    finished = pyqtSignal()
+
+    def __init__(self, stop_event, version_main=146):
+        super().__init__()
+        self.stop_event = stop_event
+        self.version_main = version_main
+        self._driver = None
+
+    def run(self):
+        stream = LogStream()
+        stream.message.connect(self.log)
+        sys.stdout = stream
+        try:
+            self._driver = open_browser(version_main=self.version_main)
+            self.driver_ready.emit(self._driver)
+            self.stop_event.wait()
+        except Exception as e:
+            self.log.emit(f"[ERROR] {e}")
+        finally:
+            if self._driver:
+                try:
+                    self._driver.quit()
+                except Exception:
+                    pass
             sys.stdout = sys.__stdout__
             self.finished.emit()
 
@@ -55,7 +92,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Ticket Bot [sodtix.com]")
         self.setMinimumWidth(700)
         self._worker = None
+        self._browser_worker = None
         self._stop_event = None
+        self._browser_stop_event = None
+        self._driver = None
         self._build_ui()
         self._check_info_file()
 
@@ -106,6 +146,12 @@ class MainWindow(QMainWindow):
 
         # Buttons
         btn_layout = QHBoxLayout()
+        self.browser_btn = QPushButton("Open Browser")
+        self.browser_btn.setFixedHeight(36)
+        self.browser_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; border-radius: 4px;")
+        self.browser_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.browser_btn.clicked.connect(self._open_browser)
+
         self.start_btn = QPushButton("Start")
         self.start_btn.setFixedHeight(36)
         self.start_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; border-radius: 4px;")
@@ -131,6 +177,7 @@ class MainWindow(QMainWindow):
         self.quit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.quit_btn.clicked.connect(self._quit)
 
+        btn_layout.addWidget(self.browser_btn)
         btn_layout.addWidget(self.start_btn)
         btn_layout.addWidget(self.stop_btn)
         btn_layout.addWidget(self.edit_btn)
@@ -171,6 +218,31 @@ class MainWindow(QMainWindow):
         self.log_view.insertPlainText(text + "\n")
         self.log_view.moveCursor(QTextCursor.MoveOperation.End)
 
+    def _open_browser(self):
+        if self._browser_worker and self._browser_worker.isRunning():
+            self._browser_stop_event.set()
+            return
+
+        self._browser_stop_event = threading.Event()
+        self._driver = None
+        self.browser_btn.setText("Close Browser")
+        self.browser_btn.setStyleSheet("background-color: #e65100; color: white; font-weight: bold; border-radius: 4px;")
+
+        self._browser_worker = BrowserWorker(self._browser_stop_event, version_main=self.ver_input.value())
+        self._browser_worker.log.connect(self._append_log)
+        self._browser_worker.driver_ready.connect(self._on_driver_ready)
+        self._browser_worker.finished.connect(self._on_browser_closed)
+        self._browser_worker.start()
+
+    def _on_driver_ready(self, driver):
+        self._driver = driver
+        self._append_log("[✓] Browser ready — click Start to begin automation")
+
+    def _on_browser_closed(self):
+        self._driver = None
+        self.browser_btn.setText("Open Browser")
+        self.browser_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; border-radius: 4px;")
+
     def _start(self):
         if not os.path.exists(INFO_FILE):
             QMessageBox.critical(self, "Error", "info.json not found. Click 'Edit info.json' first.")
@@ -191,7 +263,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(True)
         self.log_view.clear()
 
-        self._worker = BotWorker(url, cats, self._stop_event, version_main=self.ver_input.value(), auto_proceed=self.auto_proceed_check.isChecked())
+        self._worker = BotWorker(url, cats, self._stop_event, version_main=self.ver_input.value(), auto_proceed=self.auto_proceed_check.isChecked(), driver=self._driver)
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_done)
         self._worker.start()
@@ -207,8 +279,12 @@ class MainWindow(QMainWindow):
 
     def _quit(self):
         self._stop()
+        if self._browser_stop_event:
+            self._browser_stop_event.set()
         if self._worker and self._worker.isRunning():
             self._worker.wait(2000)
+        if self._browser_worker and self._browser_worker.isRunning():
+            self._browser_worker.wait(2000)
         QApplication.quit()
 
     def closeEvent(self, event):
