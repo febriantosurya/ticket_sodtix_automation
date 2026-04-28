@@ -59,9 +59,14 @@ jobs:
           --exclude-module PIL
           app.py
 
-      - name: Zip artifact
-        shell: bash
+      - name: Zip artifact (Linux)
+        if: runner.os == 'Linux'
         run: cd dist && zip -r ../${{ matrix.asset_name }} TicketBot/
+
+      - name: Zip artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/TicketBot -DestinationPath ${{ matrix.asset_name }}
 
       - uses: actions/upload-artifact@v4
         with:
