@@ -8,9 +8,10 @@ Automated ticket buyer for sodtix.com. Monitors target categories, grabs first a
 
 ## Getting Started
 
-1. Download `TicketBot` (Linux) or `TicketBot.exe` (Windows)
-2. Place it in its own folder
-3. Run it — on first launch, click **Edit info.json** to create and fill in your details
+1. Download `TicketBot-linux.zip` (Linux) or `TicketBot-windows.zip` (Windows)
+2. Extract the zip — keep all files together in the same folder
+3. Run `TicketBot` (Linux) or `TicketBot.exe` (Windows) from the extracted folder
+4. On first launch, click **Edit info.json** to create and fill in your details
 
 ## Filling in info.json
 
