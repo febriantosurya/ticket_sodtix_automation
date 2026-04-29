@@ -27,11 +27,27 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Build
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
         env:
           QT_QPA_PLATFORM: offscreen
         run: >
           pyinstaller --onedir --name TicketBot --strip
+          --collect-submodules PyQt6.QtWidgets
+          --collect-submodules PyQt6.QtCore
+          --collect-submodules PyQt6.QtGui
+          --collect-all certifi
+          --exclude-module matplotlib
+          --exclude-module numpy
+          --exclude-module PIL
+          app.py
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >
+          pyinstaller --onedir --name TicketBot
           --collect-submodules PyQt6.QtWidgets
           --collect-submodules PyQt6.QtCore
           --collect-submodules PyQt6.QtGui
