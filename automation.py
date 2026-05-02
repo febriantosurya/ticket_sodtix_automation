@@ -5,6 +5,8 @@ from selenium.webdriver.support import expected_conditions as EC
 import json
 import os
 import sys
+import time
+import re
 
 INFO_FILE = "info.json"
 
@@ -99,10 +101,9 @@ def select_gender(driver, index, gender_value):
     option.click()
 
 
-def fill_form(driver, info):
+def fill_form(driver, info, checkout_code=None):
     buyer = info["buyer"]
     holders = info["ticket_holders"]
-
     print("[~] Waiting for form...")
     wait_for(driver, By.NAME, "orderInfo.name", condition="present")
     print("[~] Form loaded. Filling buyer info...")
@@ -139,6 +140,27 @@ def fill_form(driver, info):
         print(f"[~] Selecting gender for holder {i+1}: {holder['gender']}")
         select_gender(driver, i, holder["gender"])
 
+
+    if checkout_code:
+        print(f"[~] Entering voucher code: {checkout_code}")
+        driver.execute_script("""
+            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            var el = document.querySelector('input[name="voucher"]');
+            if (el) {
+                setter.call(el, arguments[0]);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        """, checkout_code)
+        apply_btn = wait_for(driver, By.XPATH, "//button[normalize-space(text())='USE']", condition="clickable")
+        fast_click(driver, apply_btn)
+        time.sleep(0.5)
+        voucher_input = driver.find_element(By.NAME, "voucher")
+        if voucher_input.get_attribute("aria-invalid") == "true":
+            print("[!] Voucher code invalid — continuing without discount.")
+        else:
+            print("[~] Voucher applied.")
+
     print("[~] Checking agreement...")
     agree_input = driver.find_element(By.NAME, "is_aggree")
     if not agree_input.is_selected():
@@ -155,7 +177,51 @@ def open_browser(version_main=146):
     return driver
 
 
-def run(url, target_categories=None, stop_event=None, version_main=146, auto_proceed=False, driver=None):
+def find_and_click_sodtix_redirect(driver, user_choice):
+    # driver already on band site — no driver.get() here                                                                                                                                    
+                                                                                                                                                                                            
+    redirect_buttons = driver.find_elements(                                                                                                                                                
+        By.XPATH,                                                                                                                                                                           
+        "//*[self::a or self::button]["
+        "(contains(@href, 'sodtix.com') and not(contains(@href, 'mailto:'))) or "
+        "(contains(@onclick, 'sodtix.com') and not(contains(@onclick, 'mailto:'))) or "                                                                                                     
+        "(contains(@data-url, 'sodtix.com') and not(contains(@data-url, 'mailto:')))]"
+    )                                                                                                                                                                                       
+        
+    if not redirect_buttons:                                                                                                                                                                
+        print("[!] No sodtix redirect buttons found")
+        return False
+
+    idx = 0 if user_choice == "ARTIST PRESALE" else 1                                                                                                                                       
+    button = redirect_buttons[idx]
+                                                                                                                                                                                            
+    href = button.get_attribute("href")
+    if href and "sodtix.com" in href:
+        # direct link — just navigate                                                                                                                                                       
+        driver.get(href)
+        return True                                                                                                                                                                         
+        
+    onclick = button.get_attribute("onclick")                                                                                                                                               
+    if onclick:
+        for pattern in [                                                                                                                                                                    
+            re.compile(r"window\.open\('([^']+)'"),
+            re.compile(r"window\.location\.href\s*=\s*'([^']+)'"),
+            re.compile(r"document\.location\s*=\s*'([^']+)'"),                                                                                                                              
+        ]:
+            match = pattern.search(onclick)                                                                                                                                                 
+            if match:                                                                                                                                                                       
+                driver.get(match.group(1))
+                return True                                                                                                                                                                 
+        
+    # fallback: click and wait for new tab                                                                                                                                                  
+    fast_click(driver, button)
+    if len(driver.window_handles) > 1:                                                                                                                                                      
+        driver.switch_to.window(driver.window_handles[-1])
+    return True
+
+
+
+def run(url, target_categories=None, stop_event=None, version_main=146, auto_proceed=False, driver=None, band_url=None, checkout_code=None, sale_type="ARTIST PRESALE"):
     info = load_info()
     qty = len(info["ticket_holders"])
     owns_driver = driver is None
@@ -163,10 +229,30 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
         driver = create_driver(headless=False, version_main=version_main)
 
     try:
-        print(f"[~] Navigating to event page...")
-        driver.get(url)
-        print(f"[~] Title: {driver.title}")
-        print(f"[~] URL:   {driver.current_url}")
+        if band_url:
+            print(f"[~] Navigating to band site: {band_url}")
+            driver.get(band_url)
+            print(f"[~] Band site title: {driver.title}")
+            while True:
+                if stop_event and stop_event.is_set():
+                    print("[!] Stopped by user")
+                    break
+                
+                find_and_click_sodtix_redirect(driver, sale_type)
+
+                if driver.current_url == band_url:
+                    print("[!] No redirect yet, retrying...")
+                    time.sleep(1)
+                    driver.refresh()
+                else:
+                    print(f"[✓] Redirected. Now on: {driver.current_url}")
+                    break
+        else:
+            print(f"[~] Navigating to event page...")
+            driver.get(url)
+            print(f"[~] Title: {driver.title}")
+            print(f"[~] URL:   {driver.current_url}")
+
         print(f"[~] Buying {qty} ticket(s)")
         print(f"[~] Target categories: {', '.join(target_categories)}")
 
@@ -245,7 +331,7 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
                 if accordion.get_attribute("aria-expanded") != "true":
                     fast_click(driver, accordion)
 
-            fill_form(driver, info)
+            fill_form(driver, info, checkout_code)
 
             if auto_proceed:
                 print("[~] Waiting for payment dialog...")
@@ -269,7 +355,12 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
 
 
 if __name__ == "__main__":
-    url = input("Event URL: ").strip()
+    # band_url = "https://theneighbourhoodjakarta.com/"
+    # checkout_code = "testing"
+    # band_url = "https://5sosjakarta.com/"
+    band_url = input("Band URL (leave empty if event url): ").strip()
+    checkout_code = input("Checkout Code (leave empty to skip): ").strip()
+    url = input("Event URL (leave empty if using band url): ").strip()
     cats = [c.strip() for c in input("Target categories (comma-separated): ").split(",") if c.strip()]
     ver = input("Chrome version (default 146): ").strip()
-    run(url, cats, version_main=int(ver) if ver else 146)
+    run(url, cats, version_main=int(ver) if ver else 146, band_url=band_url, checkout_code=checkout_code)

@@ -10,7 +10,7 @@ if getattr(sys, 'frozen', False):
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QGroupBox, QSpinBox, QCheckBox
+    QLabel, QLineEdit, QPushButton, QTextEdit, QMessageBox, QGroupBox, QSpinBox, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QColor, QPalette, QTextCursor, QCursor
@@ -33,7 +33,7 @@ class BotWorker(QThread):
     log = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, url, categories, stop_event, version_main=146, auto_proceed=False, driver=None):
+    def __init__(self, url, categories, stop_event, version_main=146, auto_proceed=False, driver=None, band_url=None, checkout_code=None, sale_type="ARTIST PRESALE"):
         super().__init__()
         self.url = url
         self.categories = categories
@@ -41,13 +41,16 @@ class BotWorker(QThread):
         self.version_main = version_main
         self.auto_proceed = auto_proceed
         self.driver = driver
+        self.band_url = band_url
+        self.checkout_code = checkout_code
+        self.sale_type = sale_type
 
     def run(self):
         stream = LogStream()
         stream.message.connect(self.log)
         sys.stdout = stream
         try:
-            run(self.url, target_categories=self.categories, stop_event=self.stop_event, version_main=self.version_main, auto_proceed=self.auto_proceed, driver=self.driver)
+            run(self.url, target_categories=self.categories, stop_event=self.stop_event, version_main=self.version_main, auto_proceed=self.auto_proceed, driver=self.driver, band_url=self.band_url, checkout_code=self.checkout_code, sale_type=self.sale_type)
         except Exception as e:
             self.log.emit(f"[ERROR] {e}")
         finally:
@@ -90,7 +93,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Ticket Bot [sodtix.com]")
-        self.setMinimumWidth(700)
+        self.setMinimumSize(700, 600)
+        self.resize(750, 900)
         self._worker = None
         self._browser_worker = None
         self._stop_event = None
@@ -109,40 +113,59 @@ class MainWindow(QMainWindow):
         # Config group
         config_group = QGroupBox("Configuration")
         config_layout = QVBoxLayout(config_group)
+        config_layout.setSpacing(10)
 
-        url_row = QHBoxLayout()
-        url_row.addWidget(QLabel("Event URL:"))
+        def add_field(label_text, widget):
+            config_layout.addWidget(QLabel(label_text))
+            config_layout.addWidget(widget)
+
+        self.band_url_input = QLineEdit()
+        self.band_url_input.setPlaceholderText("https://5sos.com/... — leave blank for direct sodtix URL")
+        add_field("Band Site URL (optional)", self.band_url_input)
+
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("https://sodtix.com/event/...")
-        self.url_input.setMinimumWidth(450)
-        url_row.addWidget(self.url_input)
-        config_layout.addLayout(url_row)
+        self.url_input.setPlaceholderText("https://sodtix.com/event/... (required if Band Site URL blank)")
+        add_field("Sodtix Event URL", self.url_input)
 
-        cats_row = QHBoxLayout()
-        cats_row.addWidget(QLabel("Target Categories\n(priority, comma-separated):"))
         self.cats_input = QLineEdit()
         self.cats_input.setPlaceholderText("e.g. TRIBUNE 1, TRIBUNE 2")
-        cats_row.addWidget(self.cats_input)
-        config_layout.addLayout(cats_row)
+        add_field("Target Categories (priority, comma-separated)", self.cats_input)
 
-        ver_row = QHBoxLayout()
-        ver_row.addWidget(QLabel("Chrome Version:"))
-        self.ver_input = QSpinBox()
-        self.ver_input.setRange(100, 200)
-        self.ver_input.setValue(146)
-        self.ver_input.setFixedWidth(80)
-        ver_row.addWidget(self.ver_input)
-        ver_row.addStretch()
-        config_layout.addLayout(ver_row)
+        self.checkout_code_input = QLineEdit()
+        self.checkout_code_input.setPlaceholderText("Leave blank if none")
+        add_field("Voucher / Presale Code (optional)", self.checkout_code_input)
 
-        self.auto_proceed_check = QCheckBox("Auto proceed to payment after form submit")
-        config_layout.addWidget(self.auto_proceed_check)
+        self.sale_type_input = QComboBox()
+        self.sale_type_input.addItems(["Artist Presale", "General Sales"])
+        self.sale_type_input.setFixedWidth(200)
+        add_field("Sale Type", self.sale_type_input)
 
         self.info_label = QLabel("")
         self.info_label.setStyleSheet("color: green;")
         config_layout.addWidget(self.info_label)
 
         layout.addWidget(config_group)
+
+        # Settings group
+        settings_group = QGroupBox("Settings")
+        settings_layout = QHBoxLayout(settings_group)
+        settings_layout.setSpacing(20)
+
+        self.ver_input = QSpinBox()
+        self.ver_input.setRange(100, 200)
+        self.ver_input.setValue(146)
+        self.ver_input.setFixedWidth(80)
+        ver_col = QVBoxLayout()
+        ver_col.setSpacing(3)
+        ver_col.addWidget(QLabel("Chrome Version"))
+        ver_col.addWidget(self.ver_input)
+        settings_layout.addLayout(ver_col)
+
+        self.auto_proceed_check = QCheckBox("Auto proceed to payment after form submit")
+        settings_layout.addWidget(self.auto_proceed_check, alignment=Qt.AlignmentFlag.AlignBottom)
+        settings_layout.addStretch()
+
+        layout.addWidget(settings_group)
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -191,9 +214,8 @@ class MainWindow(QMainWindow):
         self.log_view.setReadOnly(True)
         self.log_view.setFont(QFont("Courier New", 10))
         self.log_view.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4; border: none;")
-        self.log_view.setMinimumHeight(300)
         log_layout.addWidget(self.log_view)
-        layout.addWidget(log_group)
+        layout.addWidget(log_group, 1)
 
     def _check_info_file(self):
         if os.path.exists(INFO_FILE):
@@ -249,10 +271,13 @@ class MainWindow(QMainWindow):
             return
 
         url = self.url_input.text().strip()
+        band_url = self.band_url_input.text().strip() or None
+        checkout_code = self.checkout_code_input.text().strip() or None
+        sale_type = self.sale_type_input.currentText().upper()
         cats = [c.strip() for c in self.cats_input.text().split(",") if c.strip()]
 
-        if not url:
-            QMessageBox.critical(self, "Error", "URL is required.")
+        if not url and not band_url:
+            QMessageBox.critical(self, "Error", "Provide either Band Site URL or Sodtix Event URL.")
             return
         if not cats:
             QMessageBox.critical(self, "Error", "At least one target category required.")
@@ -263,7 +288,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(True)
         self.log_view.clear()
 
-        self._worker = BotWorker(url, cats, self._stop_event, version_main=self.ver_input.value(), auto_proceed=self.auto_proceed_check.isChecked(), driver=self._driver)
+        self._worker = BotWorker(url, cats, self._stop_event, version_main=self.ver_input.value(), auto_proceed=self.auto_proceed_check.isChecked(), driver=self._driver, band_url=band_url, checkout_code=checkout_code, sale_type=sale_type)
         self._worker.log.connect(self._append_log)
         self._worker.finished.connect(self._on_done)
         self._worker.start()
