@@ -61,12 +61,6 @@ def create_driver(headless=False, profile_dir=None, version_main=146):
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-images")
-    options.add_argument("--blink-settings=imagesEnabled=false")
-    options.add_argument("--dns-prefetch-disable")
-    options.add_argument("--aggressive-cache-discard")
 
     if profile_dir:
         options.add_argument(f"--user-data-dir={profile_dir}")
@@ -165,10 +159,6 @@ def fill_form(driver, info, checkout_code=None):
     agree_input = driver.find_element(By.NAME, "is_aggree")
     if not agree_input.is_selected():
         fast_click(driver, agree_input)
-
-    print("[~] Submitting form...")
-    submit = wait_for(driver, By.CSS_SELECTOR, "button[type='submit']", condition="clickable")
-    fast_click(driver, submit)
 
 
 def open_browser(version_main=146):
@@ -334,6 +324,9 @@ def run(url, target_categories=None, stop_event=None, version_main=146, auto_pro
             fill_form(driver, info, checkout_code)
 
             if auto_proceed:
+                print("[~] Submitting form...")
+                submit = wait_for(driver, By.CSS_SELECTOR, "button[type='submit']", condition="clickable")
+                fast_click(driver, submit)
                 print("[~] Waiting for payment dialog...")
                 dialog = wait_for(driver, By.CSS_SELECTOR, ".MuiDialog-paper", condition="present")
                 proceed_btn = dialog.find_elements(By.TAG_NAME, "button")[-1]
